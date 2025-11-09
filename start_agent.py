@@ -27,6 +27,11 @@ async def run_simple_demo():
     from simple_demo import demo
     await demo()
 
+async def run_dynamic_demo():
+    """Run the dynamic MCP agent demo"""
+    from dynamic_mcp_agent import demo
+    await demo()
+
 async def run_full_server():
     """Run the full FastMCP server"""
     try:
@@ -70,16 +75,18 @@ Usage:
     python start_agent.py [mode]
 
 Modes:
-    server  - Run full FastMCP server (requires all dependencies)
-    simple  - Run simplified demo (no external dependencies)
-    test    - Run basic functionality tests
-    check   - Check dependency status
-    help    - Show this help message
+    server   - Run full FastMCP server (requires all dependencies)
+    simple   - Run simplified demo (no external dependencies)
+    dynamic  - Run dynamic MCP tool pool agent (LLM-driven orchestration)
+    test     - Run basic functionality tests
+    check    - Check dependency status
+    help     - Show this help message
 
 Examples:
-    python start_agent.py simple   # Run simplified demo
-    python start_agent.py server   # Run full server
-    python start_agent.py test     # Run tests
+    python start_agent.py simple    # Run simplified demo
+    python start_agent.py dynamic   # Run dynamic MCP agent
+    python start_agent.py server    # Run full server
+    python start_agent.py test      # Run tests
     """)
 
 async def main():
@@ -98,6 +105,10 @@ async def main():
     elif mode == "simple":
         print("🚀 Starting Simple Multi-Tool Agent Demo...")
         await run_simple_demo()
+    
+    elif mode == "dynamic":
+        print("🚀 Starting Dynamic MCP Tool Pool Agent...")
+        await run_dynamic_demo()
         
     elif mode == "server":
         has_deps, msg = check_dependencies()

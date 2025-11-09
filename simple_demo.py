@@ -90,12 +90,13 @@ class SimpleMultiToolAgent:
         """
         query_lower = user_query.lower()
         
-        # Simple rule-based strategy determination
-        if "purchase order" in query_lower and any(x in query_lower for x in ["po", "order"]):
-            if any(x in query_lower for x in ["movement", "trace", "flow"]):
+        # Intelligent query analysis - detect intent beyond explicit keywords
+        if "purchase order" in query_lower or any(x in query_lower for x in ["po", "order"]) or self._has_po_pattern(user_query):
+            # Check if user wants comprehensive information or just basic details
+            if self._needs_comprehensive_po_analysis(user_query):
                 return {
                     "strategy": "tool_chain",
-                    "reasoning": "Query requires tracing PO through movement flow",
+                    "reasoning": "Query suggests need for comprehensive PO analysis including movement tracking",
                     "tool_chain": [
                         {
                             "tool_name": "view_purchase_order",
@@ -117,16 +118,17 @@ class SimpleMultiToolAgent:
             else:
                 return {
                     "strategy": "single_tool",
-                    "reasoning": "Simple PO lookup",
+                    "reasoning": "Simple PO lookup based on query context",
                     "tool_name": "view_purchase_order",
                     "parameters": {"po_number": self._extract_po_number(user_query)}
                 }
         
-        elif "purchase request" in query_lower or "pr" in query_lower:
-            if any(x in query_lower for x in ["complete", "full", "details", "search"]):
+        elif "purchase request" in query_lower or "pr" in query_lower or self._has_pr_pattern(user_query):
+            # Intelligently decide if user wants full PR-to-PO analysis
+            if self._needs_comprehensive_pr_analysis(user_query):
                 return {
                     "strategy": "tool_chain",
-                    "reasoning": "Query requires complete PR analysis with related PO search",
+                    "reasoning": "Query suggests need for full PR lifecycle analysis including related PO",
                     "tool_chain": [
                         {
                             "tool_name": "view_purchase_request",
@@ -148,7 +150,7 @@ class SimpleMultiToolAgent:
             else:
                 return {
                     "strategy": "single_tool", 
-                    "reasoning": "Simple PR lookup",
+                    "reasoning": "Basic PR lookup based on query simplicity",
                     "tool_name": "view_purchase_request",
                     "parameters": {"pr_number": self._extract_pr_number(user_query)}
                 }
@@ -198,6 +200,82 @@ class SimpleMultiToolAgent:
         import re
         receipt_match = re.search(r'(GR\w+|REC\w+|\d+)', query, re.IGNORECASE)
         return receipt_match.group(1) if receipt_match else "GR1041"
+    
+    def _has_po_pattern(self, query: str) -> bool:
+        """Check if query has PO-related patterns even without explicit 'purchase order'"""
+        import re
+        return bool(re.search(r'\b(PO\w+|order\s+\w+)', query, re.IGNORECASE))
+    
+    def _has_pr_pattern(self, query: str) -> bool:
+        """Check if query has PR-related patterns"""
+        import re
+        return bool(re.search(r'\b(PR\w+|REQ\w+|request\s+\w+)', query, re.IGNORECASE))
+    
+    def _needs_comprehensive_po_analysis(self, query: str) -> bool:
+        """
+        Intelligently determine if PO query needs comprehensive analysis
+        Based on question words, context clues, and business logic
+        """
+        query_lower = query.lower()
+        
+        # Explicit comprehensive keywords
+        comprehensive_keywords = [
+            "movement", "trace", "flow", "track", "follow", "where", "location",
+            "status", "history", "lifecycle", "end-to-end", "complete", "full"
+        ]
+        
+        # Question patterns that suggest comprehensive analysis
+        question_patterns = [
+            "where is", "what happened", "how did", "show me everything",
+            "what's the status", "track this", "follow up"
+        ]
+        
+        # Business context clues
+        business_clues = [
+            "received", "delivery", "warehouse", "receipt", "goods",
+            "inventory", "stock", "shipment"
+        ]
+        
+        # If any comprehensive indicators are present
+        if any(keyword in query_lower for keyword in comprehensive_keywords):
+            return True
+            
+        if any(pattern in query_lower for pattern in question_patterns):
+            return True
+            
+        if any(clue in query_lower for clue in business_clues):
+            return True
+            
+        # If query is longer and more descriptive, likely needs comprehensive analysis
+        if len(query.split()) > 6:
+            return True
+            
+        return False
+    
+    def _needs_comprehensive_pr_analysis(self, query: str) -> bool:
+        """
+        Determine if PR query needs full lifecycle analysis
+        """
+        query_lower = query.lower()
+        
+        # Keywords suggesting need for PR-to-PO analysis
+        comprehensive_keywords = [
+            "complete", "full", "details", "search", "find", "related",
+            "associated", "linked", "converted", "generated", "created",
+            "status", "lifecycle", "end-to-end", "follow"
+        ]
+        
+        # Question patterns
+        question_patterns = [
+            "show me", "find all", "get everything", "what happened",
+            "track this", "follow this"
+        ]
+        
+        return (
+            any(keyword in query_lower for keyword in comprehensive_keywords) or
+            any(pattern in query_lower for pattern in question_patterns) or
+            len(query.split()) > 5  # Longer queries likely need more detail
+        )
     
     async def simulate_tool_call(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Simulate tool execution with realistic responses"""
@@ -429,13 +507,15 @@ async def demo():
     
     agent = SimpleMultiToolAgent()
     
-    # Test queries
+    # Test queries - mix of explicit and implicit tool chaining needs
     test_queries = [
-        "Show me details of purchase order PO12345",
-        "I need to trace the complete movement flow for purchase order JSLTEST46",
-        "Find purchase request PR789 details", 
-        "Show me complete details for purchase request REQ456",  # New: PR chain
-        "Check quality inspection for receipt GR2024",  # New: QC chain
+        "Show me details of purchase order PO12345",  # Simple - single tool
+        "Where is my order JSLTEST46 right now?",  # Implicit comprehensive - tool chain
+        "Find purchase request PR789 details",  # Simple - single tool
+        "Show me everything about purchase request REQ456",  # Implicit comprehensive - tool chain  
+        "Check quality inspection for receipt GR2024",  # QC chain
+        "PO12345",  # Minimal query - single tool
+        "What happened to order ABC123 after it was received?",  # Implicit comprehensive - tool chain
         "What's the status?"  # Should trigger clarification
     ]
     
