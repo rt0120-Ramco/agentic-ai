@@ -1,16 +1,61 @@
-# Multi-Tool Orchestrator Agent with FastMCP & LLM
+# 🚀 Agent Onboarding System
 
-An intelligent agent system that uses **FastMCP** for MCP protocol handling and **LLM** for dynamic tool orchestration. This agent can process complex natural language requests by automatically determining which tools to use and how to chain them together.
+A comprehensive **agent onboarding and management platform** that allows you to register and execute specialized AI agents with their own business policies, MCP tools, and LLM-powered workflows.
 
-## 🌟 Features
+## ✨ Key Features
 
-- **🤖 LLM-Driven Intelligence**: Uses Azure OpenAI to analyze queries and determine optimal execution strategies
-- **⛓️ Dynamic Tool Chaining**: Automatically chains multiple tools together for complex workflows
-- **🚀 FastMCP Integration**: Modern MCP protocol implementation for seamless tool communication
-- **🎯 Intelligent Parameter Mapping**: Automatically maps outputs from one tool to inputs of the next
-- **📊 Real-time Monitoring**: Track execution progress, timing, and success metrics
-- **🔧 Error Recovery**: Robust error handling with detailed diagnostic information
-- **💬 Clarification Requests**: Asks for clarification when queries are ambiguous
+- **🤖 Agent Registry & Management**: YAML-based agent configuration with automatic validation and registration
+- **📋 Policy-Aware Execution**: Business policy integration with rule-based decision making 
+- **🔧 MCP Tool Integration**: 14 production-ready tools for complete procurement workflows
+- **⛓️ Workflow Orchestration**: LLM-driven strategy determination and step-by-step execution
+- **🎯 Context Mapping**: Seamless data flow between workflow steps with parameter validation
+- **📊 Real-time Monitoring**: Complete execution tracking with comprehensive logging and analytics
+
+## 🎯 What's New
+
+✅ **Complete Agent Onboarding System** - Register agents from YAML configurations  
+✅ **Context Mapping Fixes** - All supplier_codes, item_codes, items warnings resolved  
+✅ **Production-Ready MCP Tools** - 14 tools for procurement workflow automation  
+✅ **Policy-Aware Agents** - Business rule integration with natural language processing  
+✅ **Azure OpenAI Integration** - gpt-5-mini for intelligent workflow strategy determination
+
+## 📚 Documentation
+
+**Complete documentation is available in the [docs/](docs/) folder:**
+
+- 📖 **[Documentation Index](docs/README.md)** - Complete documentation overview
+- 🚀 **[Agent Onboarding Guide](docs/guides/AGENT_ONBOARDING_SYSTEM.md)** - ⭐ **START HERE** - Main system guide
+- ⚙️ **[Setup Instructions](docs/setup/HOW_TO_RUN.md)** - Installation and configuration
+- 🏗️ **[Architecture Overview](docs/architecture/DYNAMIC_AGENT_SOLUTION.md)** - System design
+- 🔧 **[Troubleshooting](docs/troubleshooting/ISSUES_RESOLVED.md)** - Solutions and fixes
+
+## 🚀 Quick Start
+
+### 1. Installation
+```bash
+git clone <repository-url>
+cd agentic-ai
+pip install -r requirements.txt
+```
+
+### 2. Configuration  
+```bash
+# Copy environment template
+cp .env.example .env
+# Edit .env with your Azure OpenAI credentials
+```
+
+### 3. Run Agent Onboarding System
+```bash
+python enhanced_agent_onboarding.py
+```
+
+### 4. Register Your Own Agents
+```bash
+# Copy and modify the sample agent configuration
+cp supplier-filter-agent.yml my-agent.yml
+# Edit my-agent.yml with your agent policies and tools
+```
 
 ## 🏗️ Architecture
 
