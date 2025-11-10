@@ -197,11 +197,29 @@ class DynamicMCPAgent:
             return
         
         try:
-            self.openai_client = AsyncOpenAI(
-                api_key=self.config.openai_api_key,
-                base_url=self.config.openai_base_url
-            )
-            logger.info(f"🤖 AI client initialized - Model: {self.config.model_name}")
+            # Check if Azure OpenAI configuration is provided
+            azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+            azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+            
+            if azure_endpoint and azure_deployment:
+                # Use Azure OpenAI
+                from openai import AsyncAzureOpenAI
+                self.openai_client = AsyncAzureOpenAI(
+                    api_key=self.config.openai_api_key,
+                    azure_endpoint=azure_endpoint,
+                    api_version=azure_api_version
+                )
+                # Override model name with deployment name for Azure
+                self.config.model_name = azure_deployment
+                logger.info(f"🤖 Azure OpenAI client initialized - Deployment: {azure_deployment}")
+            else:
+                # Use standard OpenAI
+                self.openai_client = AsyncOpenAI(
+                    api_key=self.config.openai_api_key,
+                    base_url=self.config.openai_base_url
+                )
+                logger.info(f"🤖 OpenAI client initialized - Model: {self.config.model_name}")
         except Exception as e:
             logger.error(f"❌ Failed to initialize AI client: {e}")
             self.openai_client = None
@@ -286,23 +304,48 @@ CRITICAL RULES:
 4. Confidence should reflect certainty of strategy choice
 5. Tool names must match exactly from available tools
 6. Consider business process flows for tool chaining
+
+PARAMETER NAMING REQUIREMENTS:
+- Use EXACT parameter names from tool schemas - do not modify or abbreviate
+- For view_purchase_order: use "po_number" (not "po_id" or "purchase_order_id")
+- For view_purchase_request: use "pr_number" (not "pr_id" or "request_id") 
+- For view_movement_details: use "receipt_no" (not "receipt_number" or "receipt_id")
+- For view_inspection_details: use "receipt_no" (not "receipt_number")
+- For search_purchase_orders: use "pr_no_from", "pr_no_to", "po_no_from", "po_no_to"
+- For help_on_receipt_document: use "ref_doc_no_from", "ref_doc_no_to"
+
+OUTPUT FIELD MAPPING:
+- From search results: use "PoNo" for PO numbers, "ReceiptNo" for receipt numbers
+- Create simple context keys: "found_po", "found_receipt", "current_po" 
+- Avoid complex list iterations - use first item from arrays
 """
 
         try:
             logger.info(f"🤖 Sending query to {self.config.model_name} for analysis...")
             
-            response = await self.openai_client.chat.completions.create(
-                model=self.config.model_name,
-                messages=[
+            # Prepare parameters - handle model-specific requirements
+            chat_params = {
+                "model": self.config.model_name,
+                "messages": [
                     {
                         "role": "system",
                         "content": "You are an expert at analyzing user queries for MCP tool orchestration. Always respond with valid JSON."
                     },
                     {"role": "user", "content": prompt}
-                ],
-                temperature=self.config.llm_temperature,
-                max_tokens=self.config.max_tokens
-            )
+                ]
+            }
+            
+            # Handle model-specific parameters
+            if "gpt-5" in self.config.model_name.lower():
+                # gpt-5-mini specific requirements
+                chat_params["max_completion_tokens"] = self.config.max_tokens
+                # Skip temperature for gpt-5-mini (only supports default)
+            else:
+                # Standard models
+                chat_params["max_tokens"] = self.config.max_tokens
+                chat_params["temperature"] = self.config.llm_temperature
+            
+            response = await self.openai_client.chat.completions.create(**chat_params)
             
             response_text = response.choices[0].message.content.strip()
             logger.info(f"🧠 AI Model Response Length: {len(response_text)} chars")
@@ -585,16 +628,40 @@ CRITICAL RULES:
                     for result_field, context_key in output_mapping.items():
                         if result_field in result:
                             context[context_key] = result[result_field]
+                            logger.debug(f"🔗 Mapped output: {result_field} → {context_key} = {result[result_field]}")
                 elif isinstance(result, list) and result:
-                    # Handle list results - use first item
+                    # Handle list results - store both list and first item
+                    context[f"result_list_step_{i}"] = result
+                    
+                    # Also extract from first item for individual field mapping
                     first_item = result[0]
                     if isinstance(first_item, dict):
                         for result_field, context_key in output_mapping.items():
                             if result_field in first_item:
                                 context[context_key] = first_item[result_field]
+                                logger.debug(f"🔗 Mapped list output: {result_field} → {context_key} = {first_item[result_field]}")
+                    
+                    # Create simple, predictable aliases for AI to use
+                    if any("PoNo" in str(item) for item in result):
+                        # Simple single-value context keys (recommended)
+                        context["found_po"] = result[0].get("PoNo") if isinstance(result[0], dict) else str(result[0])
+                        context["current_po"] = context["found_po"]
+                        logger.debug(f"🔗 Created simple PO alias: found_po = {context['found_po']}")
+                    
+                    if any("ReceiptNo" in str(item) for item in result):
+                        # Simple single-value context keys (recommended)
+                        context["found_receipt"] = result[0].get("ReceiptNo") if isinstance(result[0], dict) else str(result[0])
+                        context["current_receipt"] = context["found_receipt"]
+                        logger.debug(f"🔗 Created simple Receipt alias: found_receipt = {context['found_receipt']}")
             
             # Store raw result for context as well
             context[f"step_{i}_result"] = result
+            
+            # Store commonly accessed fields for easier resolution
+            if isinstance(result, dict):
+                for key, value in result.items():
+                    if key in ["PoNo", "PrNo", "ReceiptNo"]:
+                        context[f"last_{key.lower()}"] = value
             
             # The last tool's result is the final result
             final_result = result
@@ -609,22 +676,106 @@ CRITICAL RULES:
         }
     
     def _resolve_parameters(self, parameters: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
-        """Resolve parameter placeholders using execution context"""
+        """Resolve parameter placeholders using execution context and map AI-generated parameter names"""
         resolved = {}
         
+        # Parameter name mapping: AI-generated → Actual function parameter
+        # Keep this minimal - prompt should guide AI to use correct names
+        parameter_mapping = {
+            # Only map common variations to avoid conflicts
+            "receipt_number": "receipt_no",  # Common AI variation
+            "receipt_id": "receipt_no",      # Common AI variation
+            
+            # Keep all others as-is to encourage exact naming
+            "po_number": "po_number",        # Encourage exact match
+            "pr_number": "pr_number",        # Encourage exact match
+            "pr_no_from": "pr_no_from",      # Encourage exact match
+            "pr_no_to": "pr_no_to",          # Encourage exact match
+            "po_no_from": "po_no_from",      # Encourage exact match
+            "po_no_to": "po_no_to",          # Encourage exact match
+            "ref_doc_no_from": "ref_doc_no_from",  # Encourage exact match
+            "ref_doc_no_to": "ref_doc_no_to",      # Encourage exact match
+            "receipt_no": "receipt_no",      # Encourage exact match
+        }
+        
         for key, value in parameters.items():
+            # First, map AI parameter names to actual function parameter names
+            actual_param_name = parameter_mapping.get(key, key)
+            
+            # Then resolve placeholders if present
             if isinstance(value, str) and value.startswith("{{") and value.endswith("}}"):
                 placeholder = value[2:-2]
-                if placeholder in context:
-                    resolved[key] = context[placeholder]
-                    logger.debug(f"🔄 Resolved {{{{placeholder}}}}: {placeholder} → {context[placeholder]}")
-                else:
-                    logger.warning(f"⚠️ Placeholder not found: {placeholder}")
-                    resolved[key] = value  # Keep original if not found
+                resolved_value = self._resolve_placeholder(placeholder, context)
+                resolved[actual_param_name] = resolved_value
+                
+                if resolved_value != value:  # Successfully resolved
+                    logger.debug(f"🔄 Resolved parameter mapping: {key} → {actual_param_name} = {resolved_value}")
+                else:  # Keep placeholder for debugging
+                    logger.warning(f"⚠️ Placeholder not found: {placeholder} - using fallback")
             else:
-                resolved[key] = value
+                resolved[actual_param_name] = value
+                if key != actual_param_name:
+                    logger.debug(f"🔄 Mapped parameter: {key} → {actual_param_name}")
         
         return resolved
+    
+    def _resolve_placeholder(self, placeholder: str, context: Dict[str, Any]) -> Any:
+        """Enhanced placeholder resolution with fallback strategies"""
+        
+        # Direct match
+        if placeholder in context:
+            return context[placeholder]
+        
+        # Handle array/list placeholders that AI might generate
+        if placeholder in ["po_list", "receipt_list"]:
+            # Look for recent array results in context
+            for key, value in context.items():
+                if isinstance(value, list) and value:
+                    if placeholder == "po_list" and any("PoNo" in str(item) for item in value):
+                        # Extract first PO number from search results
+                        if isinstance(value[0], dict) and "PoNo" in value[0]:
+                            logger.info(f"🔄 Resolved {placeholder} → extracted PO: {value[0]['PoNo']}")
+                            return value[0]["PoNo"]
+                    elif placeholder == "receipt_list" and any("ReceiptNo" in str(item) for item in value):
+                        # Extract first receipt number
+                        if isinstance(value[0], dict) and "ReceiptNo" in value[0]:
+                            logger.info(f"🔄 Resolved {placeholder} → extracted Receipt: {value[0]['ReceiptNo']}")
+                            return value[0]["ReceiptNo"]
+        
+        # Look for similar keys (fuzzy matching)
+        for context_key in context.keys():
+            if placeholder.lower() in context_key.lower() or context_key.lower() in placeholder.lower():
+                logger.info(f"🔄 Fuzzy resolved {placeholder} → {context_key} = {context[context_key]}")
+                return context[context_key]
+        
+        # Generate intelligent fallbacks - prefer simple naming
+        fallback_values = {
+            # Recommended simple names
+            "found_po": "PO-AUTO",
+            "current_po": "PO-AUTO",
+            "found_receipt": "GR-AUTO",
+            "current_receipt": "GR-AUTO",
+            
+            # Legacy complex names (discouraged but supported)
+            "po_list": "PO-AUTO",
+            "receipt_list": "GR-AUTO", 
+            "pr_reference": "PR-AUTO",
+            "po_reference": "PO-AUTO",
+            "receipt_reference": "GR-AUTO",
+            "PoNoList": "PO-AUTO",
+            "ReceiptNumberss": "GR-AUTO",
+            "ReceiptNumbers": "GR-AUTO",
+            "POList": "PO-AUTO",
+            "GRList": "GR-AUTO"
+        }
+        
+        if placeholder in fallback_values:
+            fallback = fallback_values[placeholder]
+            logger.info(f"🔄 Using intelligent fallback for {placeholder}: {fallback}")
+            return fallback
+        
+        # Return original placeholder if no resolution possible
+        return f"{{{{{placeholder}}}}}"
     
     async def process_request(self, user_query: str) -> Dict[str, Any]:
         """
@@ -819,20 +970,111 @@ async def register_sample_tools(agent: DynamicMCPAgent):
         examples=[{"pr_number": "PR123"}]
     )
     
-    # Register remaining tools...
-    for tool_func, name, desc, tags in [
-        (search_purchase_orders, "search_purchase_orders", "Search for purchase orders using various criteria", ["search", "purchase", "order"]),
-        (help_on_receipt_document, "help_on_receipt_document", "Find receipt documents based on reference numbers", ["receipt", "document", "reference"]),
-        (view_movement_details, "view_movement_details", "Get detailed stock movement history and current location", ["movement", "stock", "location", "tracking"]),
-        (view_inspection_details, "view_inspection_details", "Retrieve quality inspection results and test data", ["inspection", "quality", "testing", "qc"])
-    ]:
-        agent.register_mcp_tool(
-            name=name,
-            description=desc,
-            function=tool_func,
-            input_schema={"type": "object", "properties": {}, "required": []},  # Simplified for demo
-            tags=tags
-        )
+    # Register search_purchase_orders with proper schema
+    agent.register_mcp_tool(
+        name="search_purchase_orders",
+        description="Search for purchase orders using PR number ranges or PO number ranges",
+        function=search_purchase_orders,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "pr_no_from": {"type": "string", "description": "Start PR number for search range"},
+                "pr_no_to": {"type": "string", "description": "End PR number for search range"},
+                "po_no_from": {"type": "string", "description": "Start PO number for search range"},
+                "po_no_to": {"type": "string", "description": "End PO number for search range"}
+            },
+            "required": []
+        },
+        output_schema={
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "PoNo": {"type": "string", "description": "Purchase order number"},
+                    "PrNo": {"type": "string", "description": "Related purchase request number"},
+                    "SupplierName": {"type": "string", "description": "Supplier name"},
+                    "PoAmount": {"type": "number", "description": "Purchase order amount"}
+                }
+            }
+        },
+        tags=["search", "purchase", "order"]
+    )
+    
+    # Register help_on_receipt_document with proper schema
+    agent.register_mcp_tool(
+        name="help_on_receipt_document",
+        description="Find receipt documents based on reference document numbers (PO numbers)",
+        function=help_on_receipt_document,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "ref_doc_no_from": {"type": "string", "description": "Reference document number (typically PO number)"},
+                "ref_doc_no_to": {"type": "string", "description": "End reference document number for range search"}
+            },
+            "required": []
+        },
+        output_schema={
+            "type": "array",
+            "items": {
+                "type": "object", 
+                "properties": {
+                    "ReceiptNo": {"type": "string", "description": "Goods receipt number"},
+                    "RefDocNo": {"type": "string", "description": "Reference document (PO) number"},
+                    "ReceivedDate": {"type": "string", "description": "Date goods were received"}
+                }
+            }
+        },
+        tags=["receipt", "document", "reference"]
+    )
+    
+    # Register view_movement_details with proper schema
+    agent.register_mcp_tool(
+        name="view_movement_details",
+        description="Get detailed stock movement history and current location using receipt number",
+        function=view_movement_details,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "receipt_no": {"type": "string", "description": "Goods receipt number to track movements"}
+            },
+            "required": ["receipt_no"]
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "ReceiptNo": {"type": "string", "description": "Goods receipt number"},
+                "MovementHistory": {"type": "array", "description": "List of all stock movements"},
+                "CurrentLocation": {"type": "string", "description": "Current storage location"},
+                "CurrentStock": {"type": "number", "description": "Current stock quantity"}
+            }
+        },
+        tags=["movement", "stock", "location", "tracking"]
+    )
+    
+    # Register view_inspection_details with proper schema
+    agent.register_mcp_tool(
+        name="view_inspection_details",
+        description="Retrieve quality inspection results and test data for a receipt",
+        function=view_inspection_details,
+        input_schema={
+            "type": "object",
+            "properties": {
+                "receipt_no": {"type": "string", "description": "Goods receipt number for inspection lookup"}
+            },
+            "required": ["receipt_no"]
+        },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "ReceiptNo": {"type": "string", "description": "Goods receipt number"},
+                "InspectionDate": {"type": "string", "description": "Date of quality inspection"},
+                "Inspector": {"type": "string", "description": "Name of quality inspector"},
+                "InspectionResult": {"type": "string", "description": "Pass/Fail result"},
+                "QualityGrade": {"type": "string", "description": "Quality grade assigned"}
+            }
+        },
+        tags=["inspection", "quality", "testing", "qc"]
+    )
 
 async def demo():
     """Demonstrate the dynamic MCP agent"""
