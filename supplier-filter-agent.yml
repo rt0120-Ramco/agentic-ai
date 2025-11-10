@@ -1,0 +1,122 @@
+agent:
+  name: SupplierFinderAgent
+  description: >
+    Agent responsible for automating supplier discovery and evaluation tasks using real MCP tools with customer-defined policies.
+  # schedule: "0 */6 * * *"   # Uncomment to run every 6 hours (cron syntax)
+  enabled: true
+  
+  inputs:
+    purchase_request_id: "PR-2025-001"
+    user_id: "procurement.team@company.com"
+    ou: "US_CENTRAL"
+    buyer: "procurement_team"
+  
+  outputs:
+    selected_supplier: "Best supplier recommendation"
+    procurement_status: "Success/failure of procurement actions"
+    notification_result: "Notification delivery status"
+
+  policies:
+    - name: OverallRatingLeadTimePolicy
+      description: >
+        Prefer Suppliers with best overall rating and lead time <= 3 days; tie-breaker lowest items basic rate
+      depends_on: []
+
+      steps:
+        - name: get_purchase_request_details
+          description: Get Purchase Request Details using User ID/OU/Buyer to retrieve Purchase Request Header and ML Details
+
+        - name: get_supplier_item_mapping
+          description: Get Supplier Item Mapping for each distinct Item/Variant/OU available as part of ML Details to get Supplier Code - Item Code - Variant Code mapping
+
+        - name: get_supplier_addresses
+          description: Get Supplier Address Details for each distinct Item/Variant/OU available as part of ML Details to retrieve Supplier Address Details from Supplier Master
+
+        - name: get_supplier_overall_ratings
+          description: Get Supplier Overall Ratings for each distinct supplier derived from supplier item mapping to get Supplier Code Wise Overall Ratings
+
+        - name: get_supplier_lead_times
+          description: Get Supplier Lead Time for each distinct supplier to get Supplier Code/Item code/Variant Code/Lead Time with <= 3 days filter
+
+        - name: llm_supplier_evaluation
+          description: LLM evaluation using policy + step outputs from above steps to determine Item Code/Variant Code/Need Date/Best Supplier Code/Confidence Score/Justification
+
+        - name: post_po_api_call
+          description: Post PO API Call for Supplier Code + Item Code + Variant Code + Need Date + PR Line No. where LLM returned supplier code with good confidence score
+
+        - name: get_po_details
+          description: Get PO Details for each PO generated as part of the POST API Call Step to retrieve PO Header/ML/Coverage details
+
+        - name: send_notifications
+          description: Send notifications with PO Details/PR Details - Case 1 Mail with PO details for successful supplier derivation to PR Requestor, Case 2 Mail for failed supplier derivation to Procurement Team
+
+    - name: QualityRatingLeadTimePolicy
+      description: >
+        Prefer Suppliers[including Contracted] who has best quality rating & delivery leadtime <= 2 days
+      enabled: false
+      depends_on: []
+
+      steps:
+        - name: get_purchase_request_details
+          description: Get Purchase Request Details using User ID/OU/Buyer to retrieve Purchase Request Header and ML Details
+
+        - name: get_blanket_purchase_order_details
+          description: Get Blanket Purchase Order Details for each distinct Item/Variant/OU available as part of ML Details to get Valid Blanket Purchase Order details
+
+        - name: get_supplier_item_mapping
+          description: Get Supplier Item Mapping for each distinct Item/Variant/OU available as part of ML Details to get Supplier Code - Item Code - Variant Code mapping
+
+        - name: get_supplier_quality_ratings
+          description: Get Supplier Quality Ratings for each distinct supplier derived from supplier item mapping to get Supplier Code Wise Quality Index
+
+        - name: get_supplier_lead_times
+          description: Get Supplier Lead Time for each distinct supplier to get Supplier Code/Item code/Variant Code/Lead Time with <= 2 days filter
+
+        - name: llm_supplier_evaluation
+          description: LLM evaluation using policy + step outputs from above steps to determine Item Code/Variant Code/Need Date/Best Supplier Code/Confidence Score/Justification
+
+        - name: post_po_api_call
+          description: Post PO API Call for Supplier Code + Item Code + Variant Code + Need Date + PR Line No. where LLM returned supplier code with good confidence score
+
+        - name: post_prs_api_call
+          description: Post PRS API Call for BLPO No. + BLPO Line No. + Item Code + Variant Code + Need Date + PR Line No. where LLM returned supplier code with good confidence score
+
+        - name: get_po_details
+          description: Get PO Details for each PO generated as part of the POST API Call Step to retrieve PO Header/ML/Coverage details
+
+        - name: get_prs_details
+          description: Get PRS Details for each PRS generated as part of the Post PRS API Call Step to retrieve PRS Header/ML/Coverage details
+
+        - name: send_notifications
+          description: Send notifications - Case 1 Mail with PO/PRS details for successful supplier derivation to PR Requestor, Case 2 Mail for failed supplier derivation to Procurement Team
+
+    - name: QualityDeliveryPerformancePolicy
+      description: >
+        Prefer suppliers who has best quality rating & best ontime delivery rating
+      enabled: false
+      depends_on: []
+
+      steps:
+        - name: get_purchase_request_details
+          description: Get Purchase Request Details using User ID/OU/Buyer to retrieve Purchase Request Header and ML Details
+
+        - name: get_supplier_item_mapping
+          description: Get Supplier Item Mapping for each distinct Item/Variant/OU available as part of ML Details to get Supplier Code - Item Code - Variant Code mapping
+
+        - name: get_supplier_quality_ratings
+          description: Get Supplier Quality Ratings for each distinct supplier derived from supplier item mapping to get Supplier Code Wise Quality Index
+
+        - name: get_supplier_delivery_ratings
+          description: Get Supplier Delivery Index for each distinct supplier derived from supplier item mapping to get Supplier Code Wise On Time Performance Index
+
+        - name: llm_supplier_evaluation
+          description: LLM evaluation using policy + step outputs from above 4 steps to determine Item Code/Variant Code/Need Date/Best Supplier Code/Confidence Score/Justification
+
+        - name: post_po_api_call
+          description: Post PO API Call for Supplier Code + Item Code + Variant Code + Need Date + PR Line No. where LLM returned supplier code with good confidence score
+
+        - name: get_po_details
+          description: Get PO Details for each PO generated as part of the POST API Call Step to retrieve PO Header/ML/Coverage details
+
+        - name: send_notifications
+          description: Send notifications with PO Details/PR Details - Case 1 Mail with PO details for successful supplier derivation to PR Requestor, Case 2 Mail for failed supplier derivation to Procurement Team
