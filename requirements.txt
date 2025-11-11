@@ -7,6 +7,9 @@ fastmcp>=0.9.0
 # OpenAI for LLM capabilities
 openai>=1.3.0
 
+# Microsoft Agent Framework for enterprise agent orchestration
+agent-framework>=1.0.0b251108
+
 # Async HTTP client for API calls
 aiohttp>=3.8.0
 
@@ -30,3 +33,10 @@ typing-extensions>=4.8.0
 
 # Optional: For enhanced logging and monitoring
 rich>=13.0.0
+
+# Microsoft Graph SDK for integration with Microsoft services
+msgraph-sdk>=1.0.0
+
+# Authentication libraries for Microsoft Azure
+azure-identity>=1.14.0
+msal>=1.24.0
